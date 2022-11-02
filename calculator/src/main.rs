@@ -2,34 +2,46 @@ use std::collections::HashMap;
 
 fn main() {}
 
-fn postfix_calculate(equation: &str) -> f64 {
+#[derive(PartialEq, Eq, Hash, Debug)]
+enum CalculatorError {
+    InvalidToken(String),
+    TooManyOperands,
+    NotEnoughOperators,
+}
+
+fn postfix_calculate(equation: &str) -> Result<f64, CalculatorError> {
     let mut stack: Vec<f64> = Vec::new();
     let tokens = equation.split_whitespace();
     for token in tokens {
         match token {
             "+" | "-" | "*" | "/" | "^" => {
-                let right = stack.pop().unwrap();
-                let left = stack.pop().unwrap();
+                let right = stack.pop().ok_or(CalculatorError::NotEnoughOperators)?;
+                let left = stack.pop().ok_or(CalculatorError::NotEnoughOperators)?;
                 let result = match token {
                     "+" => left + right,
                     "-" => left - right,
                     "*" => left * right,
                     "/" => left / right,
                     "^" => left.powf(right),
-                    _ => panic!("Invalid operator"),
+                    _ => unreachable!(),
                 };
                 stack.push(result);
             }
             _ => {
-                let num = token.parse::<f64>().unwrap();
+                let num = token
+                    .parse::<f64>()
+                    .map_err(|_| CalculatorError::InvalidToken(token.to_string()))?;
                 stack.push(num);
             }
         }
     }
-    return stack.pop().unwrap();
+    if stack.len() > 1 {
+        return Err(CalculatorError::TooManyOperands);
+    }
+    return stack.pop().ok_or(CalculatorError::NotEnoughOperators);
 }
 
-fn infix_to_postfix(equation: &str) -> String {
+fn infix_to_postfix(equation: &str) -> Result<String, CalculatorError> {
     let tokens = equation.split_ascii_whitespace();
     let mut results: Vec<&str> = Vec::new();
     let mut operators: Vec<&str> = Vec::new();
@@ -53,9 +65,13 @@ fn infix_to_postfix(equation: &str) -> String {
         match token {
             "+" | "-" | "*" | "/" | "^" => {
                 //operator
-                let to_be_inserted_precedence = precedence.get(token).unwrap();
+                let to_be_inserted_precedence = precedence
+                    .get(token)
+                    .ok_or(CalculatorError::InvalidToken(token.to_string()))?;
                 while !operators.is_empty() {
-                    let top_precedence = precedence.get(operators.last().unwrap()).unwrap();
+                    let top_precedence = precedence
+                        .get(operators.last().unwrap())
+                        .ok_or(CalculatorError::InvalidToken(token.to_string()))?;
                     if top_precedence > to_be_inserted_precedence {
                         results.push(operators.pop().unwrap());
                     } else if top_precedence == to_be_inserted_precedence {
@@ -74,7 +90,7 @@ fn infix_to_postfix(equation: &str) -> String {
                 operators.push(token);
             }
             ")" => {
-                while operators.last().unwrap() != &"(" {
+                while !operators.is_empty() && operators.last().unwrap() != &"(" {
                     results.push(operators.pop().unwrap());
                 }
                 operators.pop();
@@ -88,12 +104,11 @@ fn infix_to_postfix(equation: &str) -> String {
     while !operators.is_empty() {
         results.push(operators.pop().unwrap());
     }
-    return results.join(" ");
+    Ok(results.join(" "))
 }
 
-fn calculate(equation: &str) -> f64 {
-    let postfix = infix_to_postfix(equation);
-    dbg!(postfix.clone());
+fn calculate(equation: &str) -> Result<f64, CalculatorError> {
+    let postfix = infix_to_postfix(equation)?;
     return postfix_calculate(&postfix);
 }
 
@@ -101,38 +116,90 @@ fn calculate(equation: &str) -> f64 {
 mod tests {
     #[test]
     fn postfix_calculate() {
-        assert_eq!(super::postfix_calculate("1 2 + 3 *"), 9.0);
-        assert_eq!(super::postfix_calculate("1 2 + 3 * 4 +"), 13.0);
+        assert_eq!(super::postfix_calculate("1 2 + 3 *"), Ok(9.0));
+        assert_eq!(super::postfix_calculate("1 2 + 3 * 4 +"), Ok(13.0));
         assert_eq!(
             super::postfix_calculate("2 3 4 ^ ^"),
-            2417851639229258349412352.0
+            Ok(2417851639229258349412352.0)
+        );
+
+        assert_eq!(
+            super::postfix_calculate("1 5"),
+            Err(super::CalculatorError::TooManyOperands)
+        );
+        assert_eq!(
+            super::postfix_calculate("1 +"),
+            Err(super::CalculatorError::NotEnoughOperators)
+        );
+        assert_eq!(
+            super::postfix_calculate("1 e + 3"),
+            Err(super::CalculatorError::InvalidToken("e".to_string()))
+        );
+        assert_eq!(
+            super::postfix_calculate(""),
+            Err(super::CalculatorError::NotEnoughOperators)
         );
     }
 
     #[test]
     fn infix_to_postfix() {
-        assert_eq!(super::infix_to_postfix("1 + 2 * 3"), "1 2 3 * +");
-        assert_eq!(super::infix_to_postfix("1 * 2 + 3"), "1 2 * 3 +");
-        assert_eq!(super::infix_to_postfix("1 * 2 / 3 + 4"), "1 2 * 3 / 4 +");
+        assert_eq!(
+            super::infix_to_postfix("1 + 2 * 3"),
+            Ok("1 2 3 * +".to_string())
+        );
+        assert_eq!(
+            super::infix_to_postfix("1 * 2 + 3"),
+            Ok("1 2 * 3 +".to_string())
+        );
+        assert_eq!(
+            super::infix_to_postfix("1 * 2 / 3 + 4"),
+            Ok("1 2 * 3 / 4 +".to_string())
+        );
 
-        assert_eq!(super::infix_to_postfix("2 ^ 3 ^ 4"), "2 3 4 ^ ^");
-        assert_eq!(super::infix_to_postfix("2 ^ 3 ^ 4 ^ 5"), "2 3 4 5 ^ ^ ^");
-        assert_eq!(super::infix_to_postfix("2 * 3 ^ 4"), "2 3 4 ^ *");
-        assert_eq!(super::infix_to_postfix("2 ^ 3 * 4"), "2 3 ^ 4 *");
+        assert_eq!(
+            super::infix_to_postfix("2 ^ 3 ^ 4"),
+            Ok("2 3 4 ^ ^".to_string())
+        );
+        assert_eq!(
+            super::infix_to_postfix("2 ^ 3 ^ 4 ^ 5"),
+            Ok("2 3 4 5 ^ ^ ^".to_string())
+        );
+        assert_eq!(
+            super::infix_to_postfix("2 * 3 ^ 4"),
+            Ok("2 3 4 ^ *".to_string())
+        );
+        assert_eq!(
+            super::infix_to_postfix("2 ^ 3 * 4"),
+            Ok("2 3 ^ 4 *".to_string())
+        );
 
-        assert_eq!(super::infix_to_postfix("( 1 + 2 ) * 3"), "1 2 + 3 *");
-        assert_eq!(super::infix_to_postfix("1 * ( 2 + 3 )"), "1 2 3 + *");
+        assert_eq!(
+            super::infix_to_postfix("( 1 + 2 ) * 3"),
+            Ok("1 2 + 3 *".to_string())
+        );
+        assert_eq!(
+            super::infix_to_postfix("1 * ( 2 + 3 )"),
+            Ok("1 2 3 + *".to_string())
+        );
         assert_eq!(
             super::infix_to_postfix("1 * ( 2 * ( 3 + 4 ) )"),
-            "1 2 3 4 + * *"
+            Ok("1 2 3 4 + * *".to_string())
         );
     }
 
     #[test]
     fn calculate() {
-        assert_eq!(super::calculate("1 + 1"), 2.0);
-        assert_eq!(super::calculate("1 + 2 * 3"), 7.0);
-        assert_eq!(super::calculate("( 1 + 2 ) * 3"), 9.0);
-        assert_eq!(super::calculate("2 ^ 3 ^ 4"), 2417851639229258349412352.0);
+        assert_eq!(super::calculate("1 + 1"), Ok(2.0));
+        assert_eq!(super::calculate("1 + 2 * 3"), Ok(7.0));
+        assert_eq!(super::calculate("( 1 + 2 ) * 3"), Ok(9.0));
+
+        assert_eq!(
+            super::calculate("2 ^ 3 ^ 4"),
+            Ok(2417851639229258349412352.0)
+        );
+        assert_eq!(
+            super::calculate("2 & 3"),
+            Err(super::CalculatorError::InvalidToken("&".to_string()))
+        );
     }
 }
